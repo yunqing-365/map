@@ -217,7 +217,36 @@ input[type=range].sm{height:2px}
 .span-cell.sel{border-color:var(--gold);background:rgba(212,160,32,.15);color:var(--gold2)}
 .span-cell.inrange{border-color:rgba(212,160,32,.35);background:rgba(212,160,32,.05)}
 .span-display{font-size:9px;color:var(--gold);margin-top:3px}
-/* rotate/flip */
+/* ── Placement Panel ── */
+.placement-panel{
+  position:absolute;left:12px;bottom:48px;width:188px;
+  background:var(--p2);border:1px solid var(--bdr2);border-radius:8px;
+  display:flex;flex-direction:column;z-index:120;
+  box-shadow:0 6px 24px rgba(0,0,0,.7);overflow:hidden;
+}
+.pp-hdr{display:flex;align-items:center;justify-content:space-between;
+  padding:7px 10px;border-bottom:1px solid var(--bdr);background:var(--p1)}
+.pp-title{font-size:9px;color:var(--gold2);font-family:var(--serif);font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+.pp-close{background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0 2px}
+.pp-close:hover{color:var(--red)}
+.pp-preview-wrap{padding:6px;background:var(--p1);border-bottom:1px solid var(--bdr)}
+#ppPreview{display:block;width:100%;border-radius:4px;image-rendering:pixelated}
+.pp-body{padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.pp-row{display:flex;align-items:center;gap:5px}
+.pp-lbl{font-size:8px;color:var(--muted);min-width:38px;flex-shrink:0}
+.pp-val{font-size:8px;color:var(--gold);min-width:34px;text-align:right;flex-shrink:0}
+.pp-btn{padding:3px 7px;border-radius:3px;border:1px solid var(--bdr);background:var(--p1);
+  color:var(--muted);font-family:var(--mono);font-size:9px;cursor:pointer;transition:all .1s;flex-shrink:0}
+.pp-btn:hover{border-color:var(--gold);color:var(--gold)}
+.pp-btn.active{background:rgba(212,160,32,.2);border-color:var(--gold2);color:var(--gold2)}
+.pp-sep{height:1px;background:var(--bdr);margin:0 -10px}
+.pp-hint{font-size:7px;color:var(--muted);text-align:center;padding:4px 8px 6px;line-height:1.5}
+.pp-span{font-size:8px;color:rgba(80,200,120,.8);text-align:center;padding:0 0 2px}
+/* detected info in import modal */
+#detectedInfo{font-size:8px;color:var(--teal);padding:3px 8px;background:rgba(40,168,136,.08);
+  border-radius:3px;border:1px solid rgba(40,168,136,.25);text-align:center;min-height:18px}
+
 .rot-btn,.flip-btn{padding:5px 8px;border-radius:4px;border:1px solid var(--bdr);background:var(--p1);
   color:var(--muted);font-family:var(--mono);font-size:9px;cursor:pointer;transition:all .12s}
 .rot-btn:hover,.flip-btn:hover{border-color:var(--bdr2)}
@@ -278,6 +307,8 @@ input[type=range].sm{height:2px}
   <div class="sep"></div>
   <button class="tbtn" onclick="document.getElementById('helpModal').classList.add('open')">❓帮助</button>
   <button class="tbtn" style="background:linear-gradient(135deg,#3a7820,#285010);border-color:#60a838;color:#d0f0a0" onclick="exportScene()">⬇PNG</button>
+  <button class="tbtn" style="background:linear-gradient(135deg,#185888,#0d3060);border-color:#3878c8;color:#b8d8ff" onclick="exportCocosJSON()" title="导出 Cocos Creator 场景 JSON（含完整素材元数据）">⬇Cocos</button>
+  <button class="tbtn" style="background:linear-gradient(135deg,#483820,#281808);border-color:#a07038;color:#e8c880" onclick="exportSpritesheet()" title="导出 PNG 精灵图集 + JSON Atlas（供 Cocos 加载）">⬇图集</button>
 </div>
 
 <!-- ── MAIN ── -->
@@ -356,6 +387,53 @@ input[type=range].sm{height:2px}
   <div class="elev-info" id="elevInfo">🏔 高度图模式</div>
   <div class="selbox-hint" id="selboxHint">Enter=填充  Del=清除  Esc=取消</div>
   <div id="flipHint"></div>
+
+  <!-- ── 放置调整面板（选中等轴自定义素材时显示）── -->
+  <div class="placement-panel" id="placementPanel" style="display:none">
+    <div class="pp-hdr">
+      <span class="pp-title" id="ppTitle">—</span>
+      <button class="pp-close" onclick="_hidePlacementPanel()">✕</button>
+    </div>
+    <div class="pp-preview-wrap">
+      <canvas id="ppPreview" width="168" height="100"></canvas>
+    </div>
+    <div class="pp-body">
+      <div class="pp-span" id="ppSpan">1×1</div>
+
+      <div class="pp-row">
+        <span class="pp-lbl">缩放</span>
+        <button class="pp-btn" onclick="adjIsoScale(-0.1)" title="[ 键">−</button>
+        <button class="pp-btn" onclick="adjIsoScale(-0.5)" style="font-size:7px">−−</button>
+        <span class="pp-val" id="ppScale">100%</span>
+        <button class="pp-btn" onclick="adjIsoScale(0.5)" style="font-size:7px">++</button>
+        <button class="pp-btn" onclick="adjIsoScale(0.1)" title="] 键">＋</button>
+      </div>
+
+      <div class="pp-row">
+        <span class="pp-lbl">锚点Y</span>
+        <input type="range" id="ppAnchorY" min="0.3" max="1.5" step="0.01" value="1.0" style="flex:1">
+        <span class="pp-val" id="ppAnchorYV">100%</span>
+      </div>
+
+      <div class="pp-sep"></div>
+
+      <div class="pp-row" style="justify-content:center;gap:6px">
+        <button class="pp-btn" onclick="adjRotate(-90)" title="逆时针90°">↺ 旋转</button>
+        <button class="pp-btn" onclick="adjRotate(90)" title="顺时针90°">↻ 旋转</button>
+        <button class="pp-btn" id="ppFlipBtn" onclick="adjFlip()">⇔ 翻转</button>
+      </div>
+
+      <div class="pp-row" style="justify-content:center">
+        <button class="pp-btn" onclick="adjReset()" style="color:var(--muted);font-size:7px">⟳ 重置默认</button>
+      </div>
+
+      <div class="pp-hint">
+        🟢绿线=地面接触线<br>
+        调整影响所有同类实例<br>
+        <span style="color:rgba(80,200,120,.6)">[ ] 键 快速缩放</span>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- RIGHT PANEL -->
@@ -382,12 +460,32 @@ input[type=range].sm{height:2px}
     <button class="abtn" onclick="fillGround()">🌿 铺满草地</button>
     <button class="abtn" onclick="clearLayer()">清空当前层</button>
     <button class="abtn danger" onclick="clearAll()">⚠ 清空全部</button>
-    <button class="abtn primary" onclick="exportScene()">⬇ 导出 PNG</button>
-    <button class="abtn blue" onclick="exportTiledJSON()">📦 导出 Tiled JSON</button>
+    <button class="abtn primary" onclick="exportScene()">⬇ 导出 PNG 截图</button>
+    <button class="abtn blue" onclick="exportCocosJSON()" title="导出 Cocos Creator 专用 JSON">🎮 导出 Cocos JSON</button>
+    <button class="abtn" style="border-color:#a07038;color:#e8c880" onclick="exportSpritesheet()" title="导出 PNG 精灵图集 + JSON Atlas">🖼 导出精灵图集</button>
+    <button class="abtn" style="border-color:var(--bdr2);color:var(--muted)" onclick="exportTiledJSON()">📦 导出 Tiled JSON</button>
     <button class="abtn teal" onclick="saveGame()">💾 保存工程</button>
     <button class="abtn" style="border-color:#28a888;color:#28a888" onclick="document.getElementById('loadInput').click()">📂 加载工程</button>
     <input type="file" id="loadInput" accept=".json" style="display:none" onchange="loadGame(event)">
     <div style="font-size:7px;color:var(--muted);margin-top:4px;text-align:center">每30秒自动存 IndexedDB</div>
+  </div>
+  <div class="rsec">
+    <div class="rsec-title">Cocos 对接说明</div>
+    <div style="font-size:7px;color:var(--muted);line-height:1.8">
+      <div style="color:var(--text);margin-bottom:3px">✅ 本编辑器完成</div>
+      场景布局 · 7图层 · 素材处理<br>
+      高度/坡度 · TOD色调预览<br>
+      walkable/solid/tags元数据<br>
+      障碍层碰撞区域定义<br>
+      flipH翻转 · isoScale缩放<br>
+      <div style="color:rgba(80,200,255,.75);margin:4px 0 3px">🎮 Cocos 负责</div>
+      物理碰撞/NavMesh寻路<br>
+      粒子/真实动态光照<br>
+      角色动画帧序列<br>
+      水面Shader动画<br>
+      UI/HUD/背包/任务<br>
+      多人同步·运行时存档
+    </div>
   </div>
   <div class="rsec">
     <div class="rsec-title">快捷键</div>
@@ -445,6 +543,14 @@ input[type=range].sm{height:2px}
         <span class="span-display" id="spanDisplay">1×1格</span>
       </div>
       <div class="span-picker" id="spanPicker"></div>
+      <div style="margin-top:5px;display:flex;align-items:center;gap:5px">
+        <button class="mbtn" style="flex:1;padding:5px" onclick="autoDetectSpan()" title="分析图片 alpha 通道，自动估算占位格数和地面线位置">
+          🔍 智能识别
+        </button>
+        <div id="detectedInfo" style="flex:2;font-size:7px;color:var(--muted);padding:3px 6px;background:var(--p1);border-radius:3px;border:1px solid var(--bdr);text-align:center">
+          处理后可识别
+        </div>
+      </div>
     </div>
     <div>
       <div class="sec-lbl">旋转 &amp; 翻转</div>

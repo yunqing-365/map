@@ -1,15 +1,14 @@
 /**
- * scene-editor.js  v2
- * 场景编辑器主控制器 — 国风全面升级版
+ * scene-editor.js  v4
+ * 场景编辑器主控制器
  *
- * 升级点：
- *  1. 7 图层系统
- *  2. 时间段 TOD（黎明/正午/黄昏/夜晚）
- *  3. Tiled 兼容 JSON 导出
- *  4. 场景 JSON 存档（含自定义素材 base64）
- *  5. IndexedDB 自动保存
- *  6. 翻转工具（H 键水平翻转已放置素材）
- *  7. 矩形框选工具（拖拽选区批量填充）
+ * v4 新增：
+ *  ★ 放置调整面板（Placement Panel）：选中自定义等轴素材时显示
+ *     - 实时调整 isoScale / anchorOffsetY / 旋转 / 翻转
+ *     - ghost 预览即时响应
+ *  ★ flipMap：每格独立翻转
+ *  ★ anchorOffsetY 参与导出和存档
+ *  ★ Cocos JSON + 精灵图集导出
  */
 
 import { RS, updateState, renderScene, renderMinimap,
@@ -18,20 +17,18 @@ import { RS, updateState, renderScene, renderMinimap,
 import { TILES, LAYER_COUNT, LAYER_NAMES, LAYER_COLORS,
          getCategoriesByLayer, getTile, registerTile, exportTilesetMeta } from './tile-defs.js';
 import { initImportPipeline, openImport, closeImport, confirmImport,
-         setFmt, setType, setPal, setRotation, toggleFlip } from './import-pipeline.js';
+         setFmt, setType, setPal, setRotation, toggleFlip,
+         autoDetectSpan } from './import-pipeline.js';
 
 // ─── 地图数据 ─────────────────────────────────────────────────────
 let MW=26, MH=20;
-
-// LAYER_COUNT 层：每格 null | string-id | {id,anchor,spanW,spanH}
 let layers   = _emptyLayers(MW,MH);
 let elevMap  = _emptyElev(MW,MH);
-
-let lVisible = Array(LAYER_COUNT).fill(true);
-let lLocked  = Array(LAYER_COUNT).fill(false);
+let flipMap  = _emptyFlipMap(MW,MH); // 每格独立翻转
 
 function _emptyLayers(w,h){return Array.from({length:LAYER_COUNT},()=>Array.from({length:h},()=>new Array(w).fill(null)));}
 function _emptyElev(w,h){return Array.from({length:h},()=>Array.from({length:w},()=>({elev:0,slope:'flat'})));}
+function _emptyFlipMap(w,h){return Array.from({length:LAYER_COUNT},()=>Array.from({length:h},()=>new Array(w).fill(false)));}
 
 // ─── 编辑状态 ─────────────────────────────────────────────────────
 let editMode='paint', activeLayer=0, selTile='grass';
@@ -39,26 +36,33 @@ let hoverTx=-1, hoverTy=-1, painting=false, dragging=false;
 let dragOrigin={}, lastPx=-1, lastPy=-1;
 let showGrid=true, showElevViz=false;
 let curElev=0, curSlope='flat', waterFrame=0;
-// 框选
-let selBoxStart=null, selBox=null; // {tx,ty}
-// 翻转状态（放置时）
+let selBoxStart=null, selBox=null;
 let _placingFlipH=false;
+let lVisible = Array(LAYER_COUNT).fill(true);
+let lLocked  = Array(LAYER_COUNT).fill(false);
 
-// 撤销/重做
+// ─── 放置调整面板状态 ─────────────────────────────────────────────
+let _panelTileId = null; // 面板当前对应的 tile id
+
+// ─── 撤销/重做 ────────────────────────────────────────────────────
 const undoStack=[], redoStack=[];
 function snapshot(){
-  undoStack.push({layers:JSON.parse(JSON.stringify(layers)),elevMap:JSON.parse(JSON.stringify(elevMap))});
+  undoStack.push({
+    layers:  JSON.parse(JSON.stringify(layers)),
+    elevMap: JSON.parse(JSON.stringify(elevMap)),
+    flipMap: JSON.parse(JSON.stringify(flipMap)),
+  });
   if(undoStack.length>80) undoStack.shift(); redoStack.length=0;
 }
 export function undo(){
   if(!undoStack.length) return;
-  redoStack.push({layers:JSON.parse(JSON.stringify(layers)),elevMap:JSON.parse(JSON.stringify(elevMap))});
-  const s=undoStack.pop(); layers=s.layers; elevMap=s.elevMap; _syncMapSize();
+  redoStack.push({layers:JSON.parse(JSON.stringify(layers)),elevMap:JSON.parse(JSON.stringify(elevMap)),flipMap:JSON.parse(JSON.stringify(flipMap))});
+  const s=undoStack.pop(); layers=s.layers; elevMap=s.elevMap; flipMap=s.flipMap??_emptyFlipMap(MW,MH); _syncMapSize();
 }
 export function redo(){
   if(!redoStack.length) return;
-  undoStack.push({layers:JSON.parse(JSON.stringify(layers)),elevMap:JSON.parse(JSON.stringify(elevMap))});
-  const s=redoStack.pop(); layers=s.layers; elevMap=s.elevMap; _syncMapSize();
+  undoStack.push({layers:JSON.parse(JSON.stringify(layers)),elevMap:JSON.parse(JSON.stringify(elevMap)),flipMap:JSON.parse(JSON.stringify(flipMap))});
+  const s=redoStack.pop(); layers=s.layers; elevMap=s.elevMap; flipMap=s.flipMap??_emptyFlipMap(MW,MH); _syncMapSize();
 }
 
 let clipboard=null, ctxTile={tx:-1,ty:-1};
@@ -120,10 +124,17 @@ function loop(ts){
   }
 
   const gop=parseFloat(document.getElementById('gridOp')?.value??2)/8*0.3;
-  renderScene(ctx,canvas,{layers,elevMap,MW,MH,lVisible,waterFrame,hoverTx,hoverTy,editMode,gridOpacity:showGrid?gop:0,showElevViz});
+  renderScene(ctx, canvas, {
+    layers, elevMap, MW, MH, lVisible, waterFrame,
+    hoverTx, hoverTy, editMode,
+    gridOpacity: showGrid ? gop : 0,
+    showElevViz,
+    flipMap,
+    placingTileId: editMode==='paint' ? selTile : null,
+    placingFlipH: _placingFlipH,
+  });
   if(editMode==='walk') drawPlayer();
 
-  // 框选显示
   if(selBox&&editMode==='select'){
     const{TSZ,scale:S}=RS;
     const x0=Math.min(selBox.tx1,selBox.tx2), y0=Math.min(selBox.ty1,selBox.ty2);
@@ -136,7 +147,6 @@ function loop(ts){
     ctx.fillStyle='rgba(80,200,255,0.08)'; ctx.fillRect(sax,say,sbx-sax,sby-say);
     ctx.restore();
   }
-
   renderMinimap(mmCanvas,layers,elevMap,MW,MH,lVisible,player.tx,player.ty);
 }
 
@@ -174,10 +184,7 @@ canvasWrap.addEventListener('mousedown',e=>{
   snapshot(); painting=true; lastPx=lastPy=-1; _paintAt(tx,ty);
 });
 
-canvasWrap.addEventListener('mouseup',e=>{
-  if(editMode==='select'&&selBox){/* keep selBox for fill action */}
-  painting=false; dragging=false; lastPx=lastPy=-1; selBoxStart=null;
-});
+canvasWrap.addEventListener('mouseup',()=>{painting=false;dragging=false;lastPx=lastPy=-1;selBoxStart=null;});
 canvasWrap.addEventListener('mouseleave',()=>{hoverTx=hoverTy=-1;painting=false;dragging=false;});
 canvasWrap.addEventListener('wheel',e=>{e.preventDefault();_zoom(e.deltaY<0?1.1:0.91);},{passive:false});
 canvasWrap.addEventListener('contextmenu',e=>e.preventDefault());
@@ -189,27 +196,31 @@ document.addEventListener('keydown',e=>{
   if(e.key===' '){e.preventDefault();setMode(editMode==='walk'?'paint':'walk');}
   if(e.ctrlKey&&e.key==='z'){e.preventDefault();undo();}
   if(e.ctrlKey&&(e.key==='y'||e.key==='Y')){e.preventDefault();redo();}
-  if(e.key==='Escape') closeImport();
-  // 模式快捷键
+  if(e.key==='Escape'){closeImport();_hidePlacementPanel();}
   const mk={p:'paint',e:'erase',f:'fill',t:'terrain',i:'pick',g:'walk',s:'select'};
   if(!e.ctrlKey&&mk[e.key]) setMode(mk[e.key]);
   if(e.key==='G') toggleGrid();
-  // 翻转当前鼠标位置的素材
   if(e.key==='h'||e.key==='H'){
     e.preventDefault();
     _placingFlipH=!_placingFlipH;
-    // 如果是已放置的素材，翻转它
     if(hoverTx>=0&&hoverTy>=0){
       for(let L=LAYER_COUNT-1;L>=0;L--){
         const id=_cellId(L,hoverTx,hoverTy);
-        if(id&&TILES[id]){snapshot();const def=getTile(id);if(def)def.flipH=!def.flipH;break;}
+        if(id&&TILES[id]){
+          snapshot();
+          const{ax,ay}=_getAnchor(L,hoverTx,hoverTy);
+          flipMap[L][ay][ax]=!flipMap[L][ay][ax]; break;
+        }
       }
     }
     document.getElementById('flipHint')&&(document.getElementById('flipHint').textContent=_placingFlipH?'[镜像放置 ON]':'');
+    _updatePanelDisplay();
   }
-  // 框选填充
   if(e.key==='Enter'&&editMode==='select'&&selBox) _fillSelBox();
   if(e.key==='Delete'&&editMode==='select'&&selBox) _eraseSelBox();
+  // 调整面板快捷键（选中等轴素材时）
+  if(e.key===']') adjIsoScale(0.1);
+  if(e.key==='[') adjIsoScale(-0.1);
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
 
@@ -230,16 +241,26 @@ function _paintAt(tx,ty){
     const anchor={ax:tx,ay:ty,spanW:sw,spanH:sh};
     layers[L][ty][tx]={id:selTile,anchor,spanW:sw,spanH:sh};
     for(let dy=0;dy<sh;dy++) for(let dx=0;dx<sw;dx++){if(dy===0&&dx===0)continue;layers[L][ty+dy][tx+dx]={id:selTile,anchor,spanW:sw,spanH:sh};}
-  } else layers[L][ty][tx]=selTile;
-  // 记录翻转状态到素材（per-instance 未实现，此处为全局）
+  } else {
+    layers[L][ty][tx]=selTile;
+  }
+  flipMap[L][ty][tx]=_placingFlipH;
 }
 
 function _eraseCell(L,tx,ty){
   const cell=layers[L]?.[ty]?.[tx]; if(!cell) return;
   if(typeof cell==='object'&&cell.anchor){
     const{ax,ay,spanW,spanH}=cell.anchor;
-    for(let dy=0;dy<spanH;dy++) for(let dx=0;dx<spanW;dx++) if(ay+dy<MH&&ax+dx<MW) layers[L][ay+dy][ax+dx]=null;
-  } else layers[L][ty][tx]=null;
+    for(let dy=0;dy<spanH;dy++) for(let dx=0;dx<spanW;dx++){
+      if(ay+dy<MH&&ax+dx<MW){layers[L][ay+dy][ax+dx]=null;flipMap[L][ay+dy][ax+dx]=false;}
+    }
+  } else { layers[L][ty][tx]=null; flipMap[L][ty][tx]=false; }
+}
+
+function _getAnchor(L,tx,ty){
+  const cell=layers[L]?.[ty]?.[tx];
+  if(cell&&typeof cell==='object'&&cell.anchor) return {ax:cell.anchor.ax,ay:cell.anchor.ay};
+  return {ax:tx,ay:ty};
 }
 
 function _fill(stx,sty){
@@ -253,22 +274,23 @@ function _fill(stx,sty){
     if(tx<0||ty<0||tx>=MW||ty>=MH) continue;
     const k=`${tx},${ty}`; if(vis.has(k)) continue;
     if(_cellId(L,tx,ty)!==target) continue;
-    vis.add(k); layers[L][ty][tx]=selTile;
+    vis.add(k); layers[L][ty][tx]=selTile; flipMap[L][ty][tx]=_placingFlipH;
     stack.push([tx+1,ty],[tx-1,ty],[tx,ty+1],[tx,ty-1]);
   }
 }
 
-// 框选填充/清除
 function _fillSelBox(){
-  if(!selBox||!selTile) return;
-  snapshot();
+  if(!selBox||!selTile) return; snapshot();
   const x0=Math.min(selBox.tx1,selBox.tx2),y0=Math.min(selBox.ty1,selBox.ty2);
   const x1=Math.max(selBox.tx1,selBox.tx2),y1=Math.max(selBox.ty1,selBox.ty2);
   const def=getTile(selTile); if(!def) return;
   const L=def.layer;
-  for(let ty=y0;ty<=y1;ty++) for(let tx=x0;tx<=x1;tx++) if(tx>=0&&ty>=0&&tx<MW&&ty<MH) layers[L][ty][tx]=selTile;
+  for(let ty=y0;ty<=y1;ty++) for(let tx=x0;tx<=x1;tx++){
+    if(tx>=0&&ty>=0&&tx<MW&&ty<MH){layers[L][ty][tx]=selTile;flipMap[L][ty][tx]=_placingFlipH;}
+  }
   selBox=null;
 }
+
 function _eraseSelBox(){
   if(!selBox) return; snapshot();
   const x0=Math.min(selBox.tx1,selBox.tx2),y0=Math.min(selBox.ty1,selBox.ty2);
@@ -280,7 +302,7 @@ function _eraseSelBox(){
 function _pick(tx,ty){
   for(let L=LAYER_COUNT-1;L>=0;L--){
     const id=_cellId(L,tx,ty);
-    if(id&&TILES[id]){selTile=id;activeLayer=L;setMode('paint');_refreshPalette();break;}
+    if(id&&TILES[id]){selTile=id;activeLayer=L;setMode('paint');_refreshPalette();_tryShowPanel();break;}
   }
 }
 
@@ -288,7 +310,7 @@ function _cellId(L,tx,ty){const c=layers[L]?.[ty]?.[tx];if(!c)return null;return
 
 // ─── UI ───────────────────────────────────────────────────────────
 const MODE_HINTS={
-  paint:  '🖌 绘制 — 点击/拖拽',
+  paint:  '🖌 绘制 — 点击/拖拽（悬停可预览）',
   erase:  '⌫ 擦除 — 点击/拖拽',
   fill:   '🪣 填充 — 点击区域',
   select: '⬜ 框选 — 拖拽选区 | Enter填充 | Del清除',
@@ -301,6 +323,8 @@ export function setMode(m){
   editMode=m; selBox=null;
   Object.keys(MODE_HINTS).forEach(k=>document.getElementById('t_'+k)?.classList.toggle('active',k===m));
   const el=document.getElementById('modeHint'); if(el) el.textContent=MODE_HINTS[m]??m;
+  if(m!=='paint') _hidePlacementPanel();
+  else _tryShowPanel();
 }
 
 export function switchTab(btn,tab){
@@ -314,7 +338,6 @@ export function doZoom(f){ updateState({scale:Math.max(.3,Math.min(5,RS.scale*f)
 export function resetView(){ updateState({scale:1,viewOX:0,viewOY:0}); }
 function _zoom(f){ doZoom(f); }
 
-// 时间段控制
 export function setTOD(tod){
   const alpha=tod==='noon'?0:0.85;
   updateState({tod,todAlpha:alpha});
@@ -352,7 +375,12 @@ function _buildGrid(cat){
     const cv=document.createElement('canvas'); cv.width=cv.height=32; cv.getContext('2d').drawImage(tc,0,0);
     const badge=document.createElement('div'); badge.className='titem-badge'; badge.textContent=def.name;
     item.appendChild(cv); item.appendChild(badge);
-    item.onclick=()=>{selTile=id;activeLayer=def.layer;document.querySelectorAll('.titem').forEach(x=>x.classList.remove('active'));item.classList.add('active');if(editMode==='walk')setMode('paint');};
+    item.onclick=()=>{
+      selTile=id; activeLayer=def.layer;
+      document.querySelectorAll('.titem').forEach(x=>x.classList.remove('active')); item.classList.add('active');
+      if(editMode==='walk')setMode('paint');
+      _tryShowPanel();
+    };
     grid.appendChild(item);
   });
 }
@@ -376,8 +404,7 @@ function _buildLayerList(){
 }
 
 function _buildElevGrid(){
-  const g=document.getElementById('elevGrid'); if(!g) return;
-  g.innerHTML='';
+  const g=document.getElementById('elevGrid'); if(!g) return; g.innerHTML='';
   for(let e=0;e<=8;e++){
     const b=document.createElement('button'); b.className='ebtn'+(e===curElev?' active':'');
     b.textContent=e===0?'平':`+${e}`;
@@ -391,19 +418,138 @@ export function setSlope(btn){
   document.querySelectorAll('.sbtn[data-slope]').forEach(b=>b.classList.toggle('active',b===btn));
 }
 
+// ─── 放置调整面板 ─────────────────────────────────────────────────
+/** 判断是否应该显示面板（仅等轴自定义素材） */
+function _tryShowPanel(){
+  const def = TILES[selTile];
+  if(editMode==='paint' && def?.isCustom && def?.isIsoTile) {
+    _showPlacementPanel();
+  } else {
+    _hidePlacementPanel();
+  }
+}
+
+function _showPlacementPanel(){
+  const p=document.getElementById('placementPanel'); if(!p) return;
+  _panelTileId=selTile;
+  p.style.display='flex';
+  _updatePanelDisplay();
+}
+
+export function _hidePlacementPanel(){
+  const p=document.getElementById('placementPanel'); if(p) p.style.display='none';
+  _panelTileId=null;
+}
+
+export function _updatePanelDisplay(){
+  const def = TILES[_panelTileId??selTile]; if(!def) return;
+  const scale = def.isoScale??1.0;
+  const anchorY = def.anchorOffsetY??1.0;
+
+  const ppScale = document.getElementById('ppScale');
+  const ppAnchor = document.getElementById('ppAnchorY');
+  const ppAnchorV = document.getElementById('ppAnchorYV');
+  const ppTitle = document.getElementById('ppTitle');
+  const ppFlip = document.getElementById('ppFlipBtn');
+  const ppSpan = document.getElementById('ppSpan');
+
+  if(ppScale) ppScale.textContent = Math.round(scale*100)+'%';
+  if(ppAnchor) ppAnchor.value = anchorY;
+  if(ppAnchorV) ppAnchorV.textContent = Math.round(anchorY*100)+'%';
+  if(ppTitle) ppTitle.textContent = def.name;
+  if(ppFlip) ppFlip.classList.toggle('active', _placingFlipH);
+  if(ppSpan) ppSpan.textContent = `${def.spanW??1}×${def.spanH??1}`;
+
+  // 渲染小预览
+  const pv = document.getElementById('ppPreview');
+  if(pv && def._isoC) {
+    const pvctx = pv.getContext('2d');
+    const pw=pv.width, ph=pv.height;
+    pvctx.clearRect(0,0,pw,ph);
+    // 棋盘格背景
+    for(let y=0;y<ph;y+=8) for(let x=0;x<pw;x+=8){
+      pvctx.fillStyle=((x>>3)+(y>>3))%2===0?'#1a1a20':'#111118';
+      pvctx.fillRect(x,y,8,8);
+    }
+    pvctx.imageSmoothingEnabled=false;
+    // 绘制素材（居中，尊重 anchorOffsetY）
+    const isoC=def._isoC;
+    const ratio=isoC.height/isoC.width;
+    let dw=pw*0.88, dh=dw*ratio;
+    if(dh>ph*0.92){dh=ph*0.92;dw=dh/ratio;}
+    const dx=(pw-dw)/2;
+    // 锚点在预览高度 85% 处
+    const groundLineY = ph*0.86;
+    const dy = groundLineY - dh*anchorY;
+    pvctx.drawImage(isoC, Math.round(dx), Math.round(dy), Math.round(dw), Math.round(dh));
+    // 地面线（绿色虚线）
+    pvctx.strokeStyle='rgba(60,220,120,0.75)';
+    pvctx.lineWidth=1; pvctx.setLineDash([3,2]);
+    pvctx.beginPath(); pvctx.moveTo(0,groundLineY); pvctx.lineTo(pw,groundLineY); pvctx.stroke();
+    pvctx.setLineDash([]);
+    pvctx.fillStyle='rgba(60,220,120,0.85)';
+    pvctx.beginPath(); pvctx.arc(pw/2,groundLineY,2.5,0,Math.PI*2); pvctx.fill();
+  }
+}
+
+/** 调整等轴缩放（[ 和 ] 键 或 ±按钮）*/
+export function adjIsoScale(delta){
+  const def=TILES[selTile]; if(!def||!def.isIsoTile) return;
+  def.isoScale = Math.max(0.1, Math.min(8.0, (def.isoScale??1.0)+delta));
+  clearTileCache();
+  _updatePanelDisplay();
+}
+
+/** 调整地面线锚点 Y（拖动滑条）*/
+export function adjAnchorY(val){
+  const def=TILES[selTile]; if(!def||!def.isIsoTile) return;
+  def.anchorOffsetY = Math.max(0.3, Math.min(1.5, parseFloat(val)));
+  _updatePanelDisplay();
+}
+
+/** 旋转素材图像（±90°）*/
+export function adjRotate(deg){
+  const def=TILES[selTile]; if(!def||!def._isoC) return;
+  const src=def._isoC;
+  const sw=src.width, sh=src.height;
+  const is90=(Math.abs(deg)===90||Math.abs(deg)===270);
+  const outW=is90?sh:sw, outH=is90?sw:sh;
+  const c=document.createElement('canvas'); c.width=outW; c.height=outH;
+  const rctx=c.getContext('2d');
+  rctx.translate(outW/2,outH/2); rctx.rotate(deg*Math.PI/180); rctx.drawImage(src,-sw/2,-sh/2);
+  def._isoC=c;
+  clearTileCache(); _refreshPalette(); _updatePanelDisplay();
+}
+
+/** 切换放置翻转（面板按钮）*/
+export function adjFlip(){
+  _placingFlipH=!_placingFlipH;
+  document.getElementById('flipHint')&&(document.getElementById('flipHint').textContent=_placingFlipH?'[镜像放置 ON]':'');
+  _updatePanelDisplay();
+}
+
+/** 重置到导入时默认值 */
+export function adjReset(){
+  const def=TILES[selTile]; if(!def) return;
+  def.isoScale=1.0; def.anchorOffsetY=1.0; clearTileCache(); _updatePanelDisplay();
+}
+
+// ─── 地图设置 ─────────────────────────────────────────────────────
 export function resizeMap(){
   const nw=+document.getElementById('mapW').value, nh=+document.getElementById('mapH').value;
   document.getElementById('mapWV').textContent=nw; document.getElementById('mapHV').textContent=nh;
-  const nl=_emptyLayers(nw,nh), ne=_emptyElev(nw,nh);
+  const nl=_emptyLayers(nw,nh), ne=_emptyElev(nw,nh), nf=_emptyFlipMap(nw,nh);
   for(let L=0;L<LAYER_COUNT;L++) for(let ty=0;ty<nh;ty++) for(let tx=0;tx<nw;tx++){
     nl[L][ty][tx]=ty<MH&&tx<MW?layers[L][ty][tx]:null;
     ne[ty][tx]=ty<MH&&tx<MW?elevMap[ty][tx]:{elev:0,slope:'flat'};
+    nf[L][ty][tx]=ty<MH&&tx<MW?(flipMap[L]?.[ty]?.[tx]??false):false;
   }
-  MW=nw; MH=nh; layers=nl; elevMap=ne;
+  MW=nw; MH=nh; layers=nl; elevMap=ne; flipMap=nf;
 }
 
 function _syncMapSize(){
   MH=layers[0].length; MW=layers[0][0].length;
+  if(flipMap[0]?.length!==MH||flipMap[0]?.[0]?.length!==MW) flipMap=_emptyFlipMap(MW,MH);
   document.getElementById('mapW').value=MW; document.getElementById('mapWV').textContent=MW;
   document.getElementById('mapH').value=MH; document.getElementById('mapHV').textContent=MH;
 }
@@ -415,31 +561,27 @@ export function updateGridLabel(){const v=+document.getElementById('gridOp').val
 
 export function fillGround(){for(let ty=0;ty<MH;ty++)for(let tx=0;tx<MW;tx++)if(!layers[0][ty][tx])layers[0][ty][tx]='grass';}
 export function clearLayer(){if(!confirm(`清空${LAYER_NAMES[activeLayer]}层？`))return;snapshot();layers[activeLayer]=Array.from({length:MH},()=>new Array(MW).fill(null));}
-export function clearAll(){if(!confirm('清空全部？'))return;snapshot();layers=_emptyLayers(MW,MH);elevMap=_emptyElev(MW,MH);}
+export function clearAll(){if(!confirm('清空全部？'))return;snapshot();layers=_emptyLayers(MW,MH);elevMap=_emptyElev(MW,MH);flipMap=_emptyFlipMap(MW,MH);}
 
 // ─── 导出 ─────────────────────────────────────────────────────────
 export function exportScene(){
   canvas.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='scene.png';a.click();});
 }
 
-/** 导出 Tiled 兼容 JSON（JSON Map Format） */
 export function exportTiledJSON(){
   const tiledLayers=[];
   for(let L=0;L<LAYER_COUNT;L++){
     const data=[];
     for(let ty=0;ty<MH;ty++) for(let tx=0;tx<MW;tx++){
       const id=_cellId(L,tx,ty);
-      // 把 tile id 转成整数 GID（简化：id 字符串哈希）
       data.push(id?Math.abs([...id].reduce((h,c)=>((h<<5)-h+c.charCodeAt(0),0),0))%10000+1:0);
     }
     tiledLayers.push({id:L,name:LAYER_NAMES[L],type:'tilelayer',width:MW,height:MH,data,visible:lVisible[L],opacity:1,x:0,y:0});
   }
   const json={
-    version:'1.10', tiledversion:'1.10.2',
-    orientation:'isometric', renderorder:'right-down',
-    width:MW, height:MH,
-    tilewidth:RS.TSZ*2, tileheight:RS.TSZ,
-    infinite:false, nextlayerid:LAYER_COUNT+1, nextobjectid:1,
+    version:'1.10',tiledversion:'1.10.2',orientation:'isometric',renderorder:'right-down',
+    width:MW,height:MH,tilewidth:RS.TSZ*2,tileheight:RS.TSZ,
+    infinite:false,nextlayerid:LAYER_COUNT+1,nextobjectid:1,
     layers:tiledLayers,
     tilesets:[{firstgid:1,name:'FarmTileset',tilewidth:RS.TSZ*2,tileheight:RS.TSZ,
       tiles:exportTilesetMeta().map((t,i)=>({id:i,class:t.id,properties:[{name:'walkable',type:'bool',value:t.walkable},{name:'tags',type:'string',value:t.tags.join(',')}]}))}],
@@ -449,7 +591,108 @@ export function exportTiledJSON(){
   a.download='scene_tiled.json'; a.click();
 }
 
-/** 完整工程存档（含自定义素材 base64） */
+/** 导出 Cocos Creator 专用 JSON（完整元数据 + anchorOffsetY） */
+export function exportCocosJSON(){
+  const tileDefinitions={};
+  for(const id in TILES){
+    const t=TILES[id];
+    const def={
+      name:t.name, layer:t.layer, layerName:LAYER_NAMES[t.layer],
+      walkable:!t.solid, solid:!!t.solid,
+      spanW:t.spanW??1, spanH:t.spanH??1, height:t.height??0,
+      tags:t.tags??[], terrainGroup:t.terrainGroup??null,
+      isWater:!!t.isWater, isCustom:!!t.isCustom, isIsoTile:!!t.isIsoTile,
+      isoScale:t.isoScale??1.0,
+      anchorOffsetY:t.anchorOffsetY??1.0,  // ★ 地面线位置，Cocos 端对齐用
+      origTSZ:t.origTSZ??RS.TSZ,
+    };
+    if(t.isCustom){
+      const src=t._isoC||t._squareC;
+      if(src){
+        const tmp=document.createElement('canvas');
+        tmp.width=src.width; tmp.height=src.height;
+        tmp.getContext('2d').drawImage(src,0,0);
+        def.spriteDataUrl=tmp.toDataURL('image/png');
+        def.spriteWidth=src.width; def.spriteHeight=src.height;
+      }
+    }
+    tileDefinitions[id]=def;
+  }
+
+  const layersData=[];
+  for(let L=0;L<LAYER_COUNT;L++){
+    const cells=[];
+    for(let ty=0;ty<MH;ty++) for(let tx=0;tx<MW;tx++){
+      const cell=layers[L]?.[ty]?.[tx]; if(!cell) continue;
+      const id=typeof cell==='string'?cell:cell.id;
+      if(typeof cell==='object'&&cell.anchor){if(cell.anchor.ax!==tx||cell.anchor.ay!==ty)continue;}
+      cells.push({
+        tx,ty,tileId:id,
+        flipH:flipMap[L]?.[ty]?.[tx]??false,
+        spanW:typeof cell==='object'?(cell.spanW??1):1,
+        spanH:typeof cell==='object'?(cell.spanH??1):1,
+      });
+    }
+    layersData.push({id:L,name:LAYER_NAMES[L],visible:lVisible[L],cells});
+  }
+
+  const elevData=[];
+  for(let ty=0;ty<MH;ty++) for(let tx=0;tx<MW;tx++){
+    const e=elevMap[ty][tx];
+    if(e.elev!==0||e.slope!=='flat') elevData.push({tx,ty,elev:e.elev,slope:e.slope});
+  }
+
+  const cocosJSON={
+    version:'cocos-1.1', editor:'国风场景编辑器 v4',
+    exportTime:new Date().toISOString(),
+    meta:{
+      mapWidth:MW, mapHeight:MH, tileSize:RS.TSZ, tod:RS.tod,
+      layerNames:LAYER_NAMES,
+      isoAngle:26.565,  // arctan(0.5)，2:1 等轴测
+    },
+    layers:layersData, elevation:elevData, tileDefinitions,
+  };
+
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(cocosJSON,null,2)],{type:'application/json'}));
+  a.download='scene_cocos.json'; a.click();
+}
+
+/** 导出精灵图集 PNG + JSON Atlas */
+export function exportSpritesheet(){
+  const TSZ=RS.TSZ;
+  const ids=Object.keys(TILES).filter(id=>!TILES[id].isInvisible);
+  const COLS=8;
+  const rows=Math.ceil(ids.length/COLS);
+  const sheetW=COLS*TSZ*2, sheetH=rows*TSZ*2;
+  const sc=document.createElement('canvas'); sc.width=sheetW; sc.height=sheetH;
+  const sctx=sc.getContext('2d'); sctx.imageSmoothingEnabled=false; sctx.clearRect(0,0,sheetW,sheetH);
+  const atlas={tileSize:TSZ,sheetWidth:sheetW,sheetHeight:sheetH,tiles:{}};
+  ids.forEach((id,i)=>{
+    const def=TILES[id]; const col=i%COLS, row=Math.floor(i/COLS);
+    const x=col*TSZ*2, y=row*TSZ*2;
+    if(def.isCustom&&def.isIsoTile&&def._isoC){
+      sctx.drawImage(def._isoC,x,y,TSZ*2,TSZ*2);
+      atlas.tiles[id]={x,y,w:TSZ*2,h:TSZ*2,name:def.name,layer:def.layer,
+        spanW:def.spanW??1,spanH:def.spanH??1,walkable:!def.solid,
+        isIsoTile:true,isoScale:def.isoScale??1.0,anchorOffsetY:def.anchorOffsetY??1.0,tags:def.tags??[]};
+    } else {
+      const tc=getTileCanvas(id,TSZ,0);
+      if(tc) sctx.drawImage(tc,x+TSZ/2,y+TSZ/2,TSZ,TSZ);
+      atlas.tiles[id]={x:x+TSZ/2,y:y+TSZ/2,w:TSZ,h:TSZ,name:def.name,layer:def.layer,
+        spanW:def.spanW??1,spanH:def.spanH??1,walkable:!def.solid,
+        isIsoTile:false,tags:def.tags??[]};
+    }
+  });
+  sc.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tileset.png';a.click();});
+  setTimeout(()=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([JSON.stringify(atlas,null,2)],{type:'application/json'}));
+    a.download='tileset_atlas.json'; a.click();
+  },300);
+}
+
+/** 完整工程存档（含 flipMap + anchorOffsetY） */
 export function saveGame(){
   const customTiles={};
   for(const id in TILES){
@@ -459,11 +702,10 @@ export function saveGame(){
     tmp.getContext('2d').drawImage(c,0,0);
     customTiles[id]={...t,_b64:tmp.toDataURL(),draw:null,_isoC:null,_squareC:null};
   }
-  const data=JSON.stringify({v:2,layers,elevMap,MW,MH,customTiles,tod:RS.tod});
+  const data=JSON.stringify({v:4,layers,elevMap,flipMap,MW,MH,customTiles,tod:RS.tod});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));
   a.download='map_save.json'; a.click();
-  // 同时写 IndexedDB
   _idbSave(data);
 }
 
@@ -474,7 +716,10 @@ export function loadGame(event){
     try{
       const data=JSON.parse(e.target.result);
       if(!data.layers||!data.elevMap) throw new Error('格式错误');
-      MW=data.MW; MH=data.MH; layers=data.layers; elevMap=data.elevMap; _syncMapSize();
+      MW=data.MW; MH=data.MH;
+      layers=data.layers; elevMap=data.elevMap;
+      flipMap=data.flipMap??_emptyFlipMap(MW,MH);
+      _syncMapSize();
       if(data.tod) setTOD(data.tod);
       if(data.customTiles){
         for(const id in data.customTiles){
@@ -496,36 +741,31 @@ export function loadGame(event){
   reader.readAsText(file); event.target.value='';
 }
 
-// ─── IndexedDB 自动保存 ───────────────────────────────────────────
+// ─── IndexedDB ────────────────────────────────────────────────────
 let _idb=null;
 async function _idbInit(){
   return new Promise((res,rej)=>{
     const req=indexedDB.open('FarmSceneMaker',1);
     req.onupgradeneeded=e=>{e.target.result.createObjectStore('saves');};
-    req.onsuccess=e=>{_idb=e.target.result;res();};
-    req.onerror=rej;
+    req.onsuccess=e=>{_idb=e.target.result;res();}; req.onerror=rej;
   });
 }
 function _idbSave(data){
   if(!_idb) return;
   try{const tx=_idb.transaction('saves','readwrite');tx.objectStore('saves').put(data,'autosave');}catch(e){}
 }
-async function _idbLoad(){
-  if(!_idb) return null;
-  return new Promise(res=>{
-    const tx=_idb.transaction('saves','readonly');
-    const req=tx.objectStore('saves').get('autosave');
-    req.onsuccess=e=>res(e.target.result??null);
-    req.onerror=()=>res(null);
-  });
-}
 
-// 定时自动保存
 setInterval(()=>{
   const customTiles={};
-  for(const id in TILES){const t=TILES[id];if(!t.isCustom)continue;const c=t._isoC||t._squareC;if(!c)continue;const tmp=document.createElement('canvas');tmp.width=c.width;tmp.height=c.height;tmp.getContext('2d').drawImage(c,0,0);customTiles[id]={...t,_b64:tmp.toDataURL(),draw:null,_isoC:null,_squareC:null};}
-  _idbSave(JSON.stringify({v:2,layers,elevMap,MW,MH,customTiles,tod:RS.tod}));
-}, 30000); // 每30秒
+  for(const id in TILES){
+    const t=TILES[id];if(!t.isCustom)continue;
+    const c=t._isoC||t._squareC;if(!c)continue;
+    const tmp=document.createElement('canvas');tmp.width=c.width;tmp.height=c.height;
+    tmp.getContext('2d').drawImage(c,0,0);
+    customTiles[id]={...t,_b64:tmp.toDataURL(),draw:null,_isoC:null,_squareC:null};
+  }
+  _idbSave(JSON.stringify({v:4,layers,elevMap,flipMap,MW,MH,customTiles,tod:RS.tod}));
+},30000);
 
 // ─── 右键菜单 ─────────────────────────────────────────────────────
 function _showCtx(e){
@@ -540,25 +780,24 @@ function _hideCtx(){document.getElementById('ctxMenu')?.classList.remove('open')
 export function ctxAction(act){
   _hideCtx(); const{tx,ty}=ctxTile;
   if(act==='copy'){
-    const cells=[];for(let L=0;L<LAYER_COUNT;L++){const id=_cellId(L,tx,ty);if(id)cells.push({L,id});}
+    const cells=[];for(let L=0;L<LAYER_COUNT;L++){const id=_cellId(L,tx,ty);if(id)cells.push({L,id,flipH:flipMap[L]?.[ty]?.[tx]??false});}
     clipboard={cells,elev:elevMap[ty]?.[tx]?.elev??0};
   } else if(act==='paste'&&clipboard){
-    snapshot(); clipboard.cells.forEach(({L,id})=>{if(!lLocked[L]&&ty<MH&&tx<MW)layers[L][ty][tx]=id;});
+    snapshot(); clipboard.cells.forEach(({L,id,flipH})=>{if(!lLocked[L]&&ty<MH&&tx<MW){layers[L][ty][tx]=id;flipMap[L][ty][tx]=flipH;}});
     if(elevMap[ty]?.[tx]) elevMap[ty][tx].elev=clipboard.elev;
   } else if(act==='pick') _pick(tx,ty);
   else if(act==='flip'){
-    // 翻转该格子的素材
-    for(let L=LAYER_COUNT-1;L>=0;L--){const id=_cellId(L,tx,ty);if(id&&TILES[id]){snapshot();const def=getTile(id);if(def)def.flipH=!def.flipH;break;}}
+    for(let L=LAYER_COUNT-1;L>=0;L--){
+      const id=_cellId(L,tx,ty);
+      if(id&&TILES[id]){snapshot();const{ax,ay}=_getAnchor(L,tx,ty);flipMap[L][ay][ax]=!flipMap[L][ay][ax];break;}
+    }
   } else if(act==='erase'){snapshot();for(let L=0;L<LAYER_COUNT;L++)_eraseCell(L,tx,ty);}
 }
 
 // ─── Init ─────────────────────────────────────────────────────────
 export async function init(){
   resizeCanvas();
-  _buildElevGrid();
-  _buildLayerList();
-  _refreshPalette();
-  updateGridLabel();
+  _buildElevGrid(); _buildLayerList(); _refreshPalette(); updateGridLabel();
 
   ['mapW','mapH'].forEach(id=>document.getElementById(id)?.addEventListener('input',resizeMap));
   document.getElementById('tszSlider')?.addEventListener('input',changeTSZ);
@@ -566,27 +805,33 @@ export async function init(){
   document.getElementById('blockHSlider')?.addEventListener('input',updateBlockH);
   document.getElementById('gridOp')?.addEventListener('input',updateGridLabel);
 
+  // 面板滑条联动
+  document.getElementById('ppAnchorY')?.addEventListener('input',e=>adjAnchorY(e.target.value));
+
   initImportPipeline((id,layer)=>{
-    activeLayer=layer;
-    _refreshPalette(); selTile=id;
+    activeLayer=layer; _refreshPalette(); selTile=id;
     document.querySelectorAll('.titem').forEach(x=>x.classList.remove('active'));
     document.querySelector(`.titem[data-id="${id}"]`)?.classList.add('active');
+    _tryShowPanel();
   });
 
-  // 全局暴露
-  const expose={setMode,switchTab,toggleGrid,toggleElevViz,doZoom,resetView,undo,redo,
+  const expose={
+    setMode,switchTab,toggleGrid,toggleElevViz,doZoom,resetView,undo,redo,
     openImport,closeImport,confirmImport,setFmt,setType,setPal,setRotation,toggleFlip,
-    setSlope,ctxAction,fillGround,clearLayer,clearAll,exportScene,exportTiledJSON,saveGame,loadGame,setTOD};
+    autoDetectSpan,
+    setSlope,ctxAction,fillGround,clearLayer,clearAll,
+    exportScene,exportTiledJSON,exportCocosJSON,exportSpritesheet,
+    saveGame,loadGame,setTOD,
+    adjIsoScale,adjAnchorY,adjRotate,adjFlip,adjReset,
+    _hidePlacementPanel,
+  };
   Object.entries(expose).forEach(([k,v])=>window[k]=v);
 
   window._selLayer=(L)=>{activeLayer=L;document.querySelectorAll('[id^=ltab]').forEach((b,i)=>b.classList.toggle('active',i===L));_refreshPalette();_buildLayerList();};
   window.selBoxFill=_fillSelBox;
   window.selBoxErase=_eraseSelBox;
 
-  // IndexedDB 初始化
   await _idbInit();
-
-  // 默认场景
   fillGround();
   [[3,3,'tree',5],[7,2,'pine',5],[14,4,'tree',5],[20,2,'bamboo',5],
    [2,8,'rock',3],[5,10,'bush',3],[10,6,'flower',1],
