@@ -120,7 +120,11 @@ export function quantizeFS(pixels, W, H, palette) {
   for (let py = 0; py < H; py++) {
     for (let px = 0; px < W; px++) {
       const oi = (py * W + px) * 4;
-      if (out[oi + 3] < 10) continue;
+      // 【修复】：强制剔除透明像素，防止透明背景被算法染成黑色
+      if (out[oi + 3] < 128) {
+        out[oi] = 0; out[oi+1] = 0; out[oi+2] = 0; out[oi+3] = 0;
+        continue;
+      }
       const ei = (py * W + px) * 3;
       let r = clamp(out[oi] + err[ei]), g = clamp(out[oi+1] + err[ei+1]), b = clamp(out[oi+2] + err[ei+2]);
       const [cr, cg, cb] = nearestColor(r, g, b, palette);

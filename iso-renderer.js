@@ -266,19 +266,19 @@ export function getSortedItems(layers, elevMap, MW, MH, lVisible) {
         const def = TILES[id]; if (!def) continue;
 
         // skip non-anchor multi-tile cells
-       if (typeof cell === 'object' && cell.anchor) {
+       // 在 getSortedItems 函数里，找到 if (typeof cell === 'object' && cell.anchor) 分支
+        if (typeof cell === 'object' && cell.anchor) {
           const key = `${layer}_${cell.anchor.ax}_${cell.anchor.ay}`;
           if (seen.has(key)) continue;
           seen.add(key);
           const atx = cell.anchor.ax, aty = cell.anchor.ay;
           const elev = elevMap?.[aty]?.[atx]?.elev ?? 0;
           
-          // 【核心修复】：以建筑占地的最右下角（视觉最前方）计算深度
+          // 【核心修复】：将建筑深度计算锚点转移到建筑占地的最右下角（最接近屏幕的一角）
           const footTx = atx + (cell.spanW ?? 1) - 1;
           const footTy = aty + (cell.spanH ?? 1) - 1;
+          const depth = (footTx + footTy) + elev * 0.5 + layer * 0.1;
           
-          // 图层权重：地面 0, 物件 0.1, 建筑 0.2, 障碍 0.3
-          const depth = (footTx + footTy) + elev * 0.5 + layer * 0.1; 
           items.push({ tx: atx, ty: aty, layer, id, depth, elev,
                        spanW: cell.spanW ?? 1, spanH: cell.spanH ?? 1 });
         } else {
@@ -360,8 +360,9 @@ export function renderScene(ctx, canvas, {
       const anchorDx = sx + TSZ * S * (spanW + spanH - 1);        
       const anchorDy = sy + TSZ * S * (spanW + spanH) / 2;        
 
-      const targetW = TSZ * S * 2 * Math.max(spanW, spanH);
-      const targetH = isoC.height / isoC.width * targetW;
+      const scaleRatio = RS.TSZ / (def.origTSZ || RS.TSZ);
+      const targetW = def.isoW * scaleRatio * S;
+      const targetH = def.isoH * scaleRatio * S;
 
       ctx.save(); 
       ctx.imageSmoothingEnabled = false;

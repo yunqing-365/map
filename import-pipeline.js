@@ -188,42 +188,27 @@ async function _run() {
   const warm     = +(_val('mWarm')     ?? 5);
   const TSZ      = RS.TSZ; // match current scene tile size
 
-  if (_fmt === 'iso') {
-    // Already-isometric sprite: colour-correct + grain, keep original geometry
+if (_fmt === 'iso') {
+    // 【核心修复】：不再强制降采样和抖动，直接渲染原图以保留最高画质！
     const scaleRatio = +(_val('mIsoSc') ?? 100) / 100;
     const srcW = _img.naturalWidth, srcH = _img.naturalHeight;
-    const tW   = Math.round(TSZ * 2 * scaleRatio);
+    const spanMax = Math.max(_spanW, _spanH);
+    const tW   = Math.round(RS.TSZ * 2 * spanMax * scaleRatio);
     const tH   = Math.round(srcH / srcW * tW);
 
-    const tmp = new OffscreenCanvas(srcW, srcH);
-    tmp.getContext('2d').drawImage(_img, 0, 0);
-    let px = tmp.getContext('2d').getImageData(0, 0, srcW, srcH).data;
-    px = colorAdjust(px, srcW, srcH, contrast, sat, warm);
-
-    const pw = Math.max(4, Math.round(tW / grain));
-    const ph = Math.max(4, Math.round(tH / grain));
-    const sm = downsample(px, srcW, srcH, pw, ph);
-    const pal = _palMode === 'stardew' ? SDW_PALETTE : medianCut(sm, pw * ph, colors);
-    const q = quantizeFS(sm, pw, ph, pal);
-
-    const sc = new OffscreenCanvas(pw, ph);
-    sc.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(q), pw, ph), 0, 0);
-
-    // preserve alpha channel from original
-    const origSm = downsample(px, srcW, srcH, pw, ph);
-    const qd = sc.getContext('2d').getImageData(0, 0, pw, ph);
-    for (let i = 3; i < qd.data.length; i += 4) qd.data[i] = origSm[i];
-    sc.getContext('2d').putImageData(qd, 0, 0);
-
     const isoC = new OffscreenCanvas(tW, tH);
-    const ictx = isoC.getContext('2d'); ictx.imageSmoothingEnabled = false;
-    ictx.drawImage(sc, 0, 0, tW, tH);
+    const ictx = isoC.getContext('2d'); 
+    ictx.imageSmoothingEnabled = false;
+    
+    // 直接绘制原图，消除一切噪点
+    ictx.drawImage(_img, 0, 0, tW, tH);
 
     _processed = { mode: 'iso', isoC, tW, tH };
     _setStep(4);
     _renderPreview();
 
   } else {
+    // ... 下面的 flat 逻辑保持不变 ...
     // Flat square → pixelize → iso-project top face
     const pixSz = +(_val('mPixSz') ?? 3);
     const pixC  = await pixelizeImage(_img, { tileSize: TSZ, pixSz, grain, colors, contrast, sat, warm, palMode: _palMode });
@@ -258,6 +243,7 @@ export function confirmImport() {
       spanW: _spanW, spanH: _spanH,
       isCustom: true, isIsoTile: true,
       _isoC: canvas, isoW: tW, isoH: tH,
+      seam:false,
       seam: false,
       // draw() used only for palette thumbnail — squeeze to square
       draw: (c, s) => { c.imageSmoothingEnabled = false; c.drawImage(canvas, 0, 0, s, s); },

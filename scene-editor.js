@@ -402,7 +402,7 @@ function _buildElevGrid() {
 
 export function setSlope(btn) {
   curSlope = btn.dataset.slope;
-  document.querySelectorAll('.slope-btn[data-slope]').forEach(b => b.classList.toggle('active', b === btn));
+  document.querySelectorAll('.sbtn[data-slope]').forEach(b => b.classList.toggle('active', b === btn));
 }
 
 export function resizeMap() {
@@ -464,6 +464,68 @@ export function exportScene() {
   const a = document.createElement('a');
   canvas.toBlob(b => { a.href = URL.createObjectURL(b); a.download = 'scene.png'; a.click(); });
 }
+
+import { registerTile } from './tile-defs.js';
+
+export function saveGame() {
+  const customTiles = {};
+  // 将自定义导入的素材转为 Base64 一并打包，防止刷新后丢失
+  for (const id in TILES) {
+    const t = TILES[id];
+    if (t.isCustom) {
+      const c = t._isoC || t._squareC;
+      if (!c) continue;
+      const temp = document.createElement('canvas');
+      temp.width = c.width; temp.height = c.height;
+      temp.getContext('2d').drawImage(c, 0, 0);
+      customTiles[id] = { ...t, _base64: temp.toDataURL(), draw: null, _isoC: null, _squareC: null };
+    }
+  }
+  const data = JSON.stringify({ layers, elevMap, MW, MH, customTiles });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+  a.download = 'farm_map_save.json';
+  a.click();
+}
+
+export function loadGame(event) {
+  const file = event.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.layers || !data.elevMap) throw new Error();
+      MW = data.MW; MH = data.MH;
+      layers = data.layers; elevMap = data.elevMap;
+      _syncMapSize(); snapshot();
+      
+      // 恢复自定义素材
+      if (data.customTiles) {
+        for (const id in data.customTiles) {
+          const ct = data.customTiles[id];
+          const img = new Image();
+          img.onload = () => {
+            const cv = document.createElement('canvas');
+            cv.width = img.width; cv.height = img.height;
+            cv.getContext('2d').drawImage(img, 0, 0);
+            if (ct.isIsoTile) ct._isoC = cv; else ct._squareC = cv;
+            ct.draw = (c, s) => { c.imageSmoothingEnabled = false; c.drawImage(cv, 0, 0, s, s); };
+            registerTile(id, ct);
+            _refreshPalette(); // 刷新左侧面板
+          };
+          img.src = ct._base64;
+        }
+      }
+      alert('✅ 存档加载成功！');
+    } catch(err) { alert('❌ 存档损坏或格式错误！'); }
+  };
+  reader.readAsText(file);
+  event.target.value = ''; // 清空 input
+}
+
+// 暴露给全局
+window.saveGame = saveGame;
+window.loadGame = loadGame;
 
 // ─── Context menu ─────────────────────────────────────────────────
 function _showCtx(e) {

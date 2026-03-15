@@ -347,6 +347,10 @@ input[type=range].sm{height:2px}
     <button class="abtn" onclick="clearLayer()">清空当前层</button>
     <button class="abtn danger" onclick="clearAll()">⚠ 清空全部</button>
     <button class="abtn primary" onclick="exportScene()">⬇ 导出 PNG</button>
+    
+    <button class="abtn primary" style="background:linear-gradient(180deg,#28a888,#187858);border-color:#28a888;" onclick="saveGame()">💾 保存工程存档</button>
+    <button class="abtn" style="border-color:#28a888;color:#28a888;" onclick="document.getElementById('loadInput').click()">📂 加载工程存档</button>
+    <input type="file" id="loadInput" accept=".json" style="display:none" onchange="loadGame(event)">
   </div>
 </div>
 
@@ -409,8 +413,17 @@ input[type=range].sm{height:2px}
       <div class="sec-lbl">像素化参数</div>
       <div class="mrow"><span class="mlbl">颗粒度</span><input type="range" class="sm" id="mGrain" min="1" max="8" value="2" step="1" style="flex:1"><span class="mval" id="mGrainV">2px</span></div>
       <div class="mrow" id="mFlatRow"><span class="mlbl">像素块</span><input type="range" class="sm" id="mPixSz" min="1" max="8" value="3" step="1" style="flex:1"><span class="mval" id="mPixSzV">3px</span></div>
-      <div class="mrow" id="mIsoRow" style="display:none"><span class="mlbl">缩放比</span><input type="range" class="sm" id="mIsoSc" min="50" max="200" value="100" step="10" style="flex:1"><span class="mval" id="mIsoScV">100%</span></div>
-      <div class="mrow"><span class="mlbl">颜色数</span><input type="range" class="sm" id="mColors" min="8" max="64" value="32" step="2" style="flex:1"><span class="mval" id="mColorsV">32色</span></div>
+      <div class="mrow" id="mIsoRow" style="display:none">
+        <span class="mlbl">缩放比</span>
+        <input type="range" class="sm" id="mIsoSc" min="10" max="1000" value="100" step="10" style="flex:1">
+        <span class="mval" id="mIsoScV">100%</span>
+      </div>
+      <div class="mrow">
+        <span class="mlbl">颜色数</span>
+        <input type="range" class="sm" id="mColors" min="8" max="64" value="32" step="2" style="flex:1">
+        <span class="mval" id="mColorsV">32色</span>
+      </div>
+      
       <div class="mrow"><span class="mlbl">对比度</span><input type="range" class="sm" id="mContrast" min="80" max="160" value="120" step="2" style="flex:1"><span class="mval" id="mContrastV">1.20</span></div>
       <div class="mrow"><span class="mlbl">饱和度</span><input type="range" class="sm" id="mSat" min="70" max="180" value="125" step="2" style="flex:1"><span class="mval" id="mSatV">1.25</span></div>
       <div class="mrow"><span class="mlbl">暖色调</span><input type="range" class="sm" id="mWarm" min="-15" max="25" value="5" step="1" style="flex:1"><span class="mval" id="mWarmV">+5</span></div>
