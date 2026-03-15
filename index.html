@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Farm Scene Maker</title>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ── reset & vars ─────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0c0a06;--p1:#141008;--p2:#1c160a;--p3:#24200e;
+  --bdr:rgba(180,140,40,.12);--bdr2:rgba(180,140,40,.30);
+  --gold:#d4a020;--gold2:#f0c030;--cream:#f0dfa0;
+  --green:#3a7820;--green2:#60a838;
+  --teal:#28a888;--red:#a02010;
+  --text:#d8c880;--muted:#6a5820;
+  --serif:'Lora',Georgia,serif;--mono:'DM Mono',monospace;
+  --toolH:44px;
+}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--mono)}
+
+/* ── layout ───────────────────────────────────────────────────── */
+.app{display:grid;grid-template-rows:var(--toolH) 1fr;height:100vh}
+.main{display:grid;grid-template-columns:216px 1fr 188px;overflow:hidden}
+
+/* ── toolbar ──────────────────────────────────────────────────── */
+.toolbar{background:var(--p1);border-bottom:2px solid var(--bdr2);display:flex;align-items:center;padding:0 10px;gap:5px;z-index:200}
+.logo{font-family:var(--serif);font-weight:700;font-size:13px;color:var(--gold2);text-shadow:1px 1px 0 #000;white-space:nowrap;margin-right:6px}
+.sep{width:1px;height:22px;background:var(--bdr2);margin:0 3px;flex-shrink:0}
+.lbl{font-size:7px;color:var(--muted);letter-spacing:.12em;white-space:nowrap}
+.tbtn{padding:4px 10px;border-radius:4px;border:1px solid var(--bdr2);background:transparent;color:var(--text);
+  font-family:var(--mono);font-size:8px;letter-spacing:.06em;cursor:pointer;transition:all .12s;white-space:nowrap;flex-shrink:0}
+.tbtn:hover{border-color:var(--gold);color:var(--gold)}
+.tbtn.active{background:rgba(212,160,32,.2);border-color:var(--gold2);color:var(--gold2)}
+
+/* ── left panel ───────────────────────────────────────────────── */
+.lp{background:var(--p1);border-right:2px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden}
+.ptabs{display:flex;background:var(--p2);border-bottom:1px solid var(--bdr)}
+.ptab{flex:1;padding:7px 0;font-size:8px;text-transform:uppercase;letter-spacing:.07em;text-align:center;
+  cursor:pointer;color:var(--muted);border:none;background:none;font-family:var(--mono);border-bottom:2px solid transparent;transition:all .12s}
+.ptab:hover{color:var(--text)}
+.ptab.active{color:var(--gold2);border-bottom-color:var(--gold)}
+.tab-pane{flex:1;overflow:hidden;display:none;flex-direction:column}
+.tab-pane.active{display:flex}
+
+/* tile palette */
+.tcats{display:flex;flex-wrap:wrap;gap:3px;padding:6px 8px;border-bottom:1px solid var(--bdr)}
+.tcat{padding:2px 6px;border-radius:3px;border:1px solid var(--bdr);background:transparent;color:var(--muted);
+  font-family:var(--mono);font-size:7px;cursor:pointer;transition:all .12s}
+.tcat:hover{border-color:var(--bdr2);color:var(--text)}
+.tcat.active{border-color:var(--gold);color:var(--gold2);background:rgba(212,160,32,.08)}
+.tgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;padding:7px;overflow-y:auto;flex:1}
+.tgrid::-webkit-scrollbar{width:3px}
+.tgrid::-webkit-scrollbar-thumb{background:var(--bdr2)}
+.titem{aspect-ratio:1;border-radius:3px;border:1px solid var(--bdr);cursor:pointer;background:var(--p2);
+  transition:all .12s;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center}
+.titem:hover{border-color:var(--bdr2)}
+.titem.active{border-color:var(--gold2);box-shadow:0 0 0 1px var(--gold)}
+.titem canvas{width:100%;height:100%;image-rendering:pixelated;display:block}
+.titem-badge{position:absolute;bottom:0;left:0;right:0;font-size:5px;background:rgba(0,0,0,.7);
+  color:var(--cream);text-align:center;padding:1px;opacity:0;transition:opacity .1s}
+.titem:hover .titem-badge{opacity:1}
+.titem.custom::after{content:'✦';position:absolute;top:1px;right:2px;font-size:6px;color:var(--gold2)}
+.imp-row{padding:6px 8px;border-top:1px solid var(--bdr);flex-shrink:0}
+.imp-trigger{width:100%;padding:6px;border-radius:4px;border:1px dashed var(--bdr2);background:transparent;
+  color:var(--muted);font-family:var(--mono);font-size:8px;cursor:pointer;transition:all .15s;letter-spacing:.08em}
+.imp-trigger:hover{border-color:var(--gold);color:var(--gold)}
+
+/* terrain tab */
+.terrain-tab{padding:10px;overflow-y:auto;flex:1}
+.terrain-tab::-webkit-scrollbar{width:3px}
+.terrain-tab::-webkit-scrollbar-thumb{background:var(--bdr2)}
+.tsec{margin-bottom:14px}
+.tsec-title{font-size:7px;color:var(--muted);letter-spacing:.2em;text-transform:uppercase;
+  margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--bdr)}
+.tsec p{font-size:8px;color:var(--muted);line-height:1.7;margin-top:6px}
+.egrid{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-bottom:6px}
+.ebtn{padding:5px 0;border-radius:3px;border:1px solid var(--bdr);background:var(--p2);
+  color:var(--muted);font-family:var(--mono);font-size:8px;cursor:pointer;text-align:center;transition:all .12s}
+.ebtn:hover{border-color:var(--bdr2)}
+.ebtn.active{border-color:var(--gold);color:var(--gold2);background:rgba(212,160,32,.1)}
+.sgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:3px}
+.sbtn{padding:5px 3px;border-radius:3px;border:1px solid var(--bdr);background:var(--p2);
+  color:var(--muted);font-family:var(--mono);font-size:8px;cursor:pointer;text-align:center;transition:all .12s}
+.sbtn:hover{border-color:var(--bdr2)}
+.sbtn.active{border-color:var(--teal);color:var(--teal);background:rgba(40,168,136,.1)}
+
+/* layers tab */
+.layers-tab{padding:10px;overflow-y:auto;flex:1}
+
+/* ── canvas ───────────────────────────────────────────────────── */
+.carea{position:relative;overflow:hidden;background:#060808;cursor:crosshair}
+#gc{display:block;image-rendering:pixelated;position:absolute;top:0;left:0}
+.mode-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
+  background:rgba(8,6,4,.9);border:1px solid var(--bdr);padding:4px 14px;border-radius:20px;
+  font-size:8px;color:var(--muted);letter-spacing:.1em;pointer-events:none}
+.zbtns{position:absolute;bottom:12px;right:12px;display:flex;flex-direction:column;gap:3px}
+.zbtn{width:26px;height:26px;border-radius:4px;border:1px solid var(--bdr2);background:var(--p1);
+  color:var(--text);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .12s}
+.zbtn:hover{border-color:var(--gold);color:var(--gold)}
+.coords-info{position:absolute;top:10px;left:10px;font-size:8px;color:var(--muted);
+  background:rgba(8,6,4,.8);padding:3px 10px;border-radius:3px;letter-spacing:.06em}
+.elev-info{position:absolute;top:10px;right:10px;font-size:8px;color:var(--teal);
+  background:rgba(8,6,4,.8);padding:3px 10px;border-radius:3px;display:none}
+
+/* ── right panel ──────────────────────────────────────────────── */
+.rp{background:var(--p1);border-left:2px solid var(--bdr);overflow-y:auto;display:flex;flex-direction:column}
+.rp::-webkit-scrollbar{width:3px}
+.rp::-webkit-scrollbar-thumb{background:var(--bdr2)}
+.rsec{padding:10px 12px;border-bottom:1px solid var(--bdr)}
+.rsec-title{font-size:7px;color:var(--muted);letter-spacing:.2em;text-transform:uppercase;
+  margin-bottom:8px;display:flex;align-items:center;gap:5px}
+.rsec-title::before{content:'◆';font-size:5px;color:var(--gold)}
+#minimap{display:block;image-rendering:pixelated;width:100%;border-radius:3px;border:1px solid var(--bdr)}
+.lrow{display:flex;align-items:center;gap:6px;margin-bottom:4px;padding:4px 5px;
+  border-radius:3px;border:1px solid transparent;cursor:pointer;transition:all .12s}
+.lrow:hover{border-color:var(--bdr)}
+.lrow.active{border-color:var(--bdr2);background:rgba(180,140,40,.06)}
+.leye{font-size:10px;cursor:pointer;opacity:.4;flex-shrink:0;transition:opacity .12s}
+.leye.on{opacity:1}
+.ldot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.lname{font-size:9px;flex:1;color:var(--text)}
+.llock{font-size:9px;color:var(--muted);cursor:pointer;flex-shrink:0}
+.srow{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.slbl{font-size:8px;color:var(--muted);flex:1}
+.sval{font-size:8px;color:var(--gold);min-width:28px;text-align:right}
+input[type=range]{-webkit-appearance:none;height:2px;background:var(--bdr2);border-radius:2px;outline:none;flex:1}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--gold);border:2px solid var(--bg);cursor:pointer}
+.krow{display:flex;align-items:center;gap:5px;margin-bottom:4px;font-size:8px;color:var(--muted)}
+.krow b{color:var(--text);background:var(--p2);border:1px solid var(--bdr2);padding:1px 5px;border-radius:3px;font-size:7px;font-weight:normal}
+.abtn{width:100%;padding:7px;border-radius:4px;border:1px solid var(--bdr2);background:transparent;
+  color:var(--text);font-family:var(--mono);font-size:8px;letter-spacing:.07em;text-transform:uppercase;
+  cursor:pointer;transition:all .15s;margin-bottom:5px;display:block;text-align:center}
+.abtn:hover{border-color:var(--gold);color:var(--gold)}
+.abtn.primary{background:linear-gradient(180deg,var(--green2),var(--green));border-color:var(--green2);color:var(--cream);box-shadow:0 2px 0 #1a4010}
+.abtn.primary:hover{filter:brightness(1.1)}
+.abtn.danger:hover{border-color:var(--red);color:var(--red)}
+
+/* ── import modal ─────────────────────────────────────────────── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:999;
+  display:none;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--p2);border:2px solid var(--bdr2);border-radius:10px;
+  width:490px;max-height:88vh;overflow-y:auto;display:flex;flex-direction:column}
+.modal::-webkit-scrollbar{width:3px}
+.modal::-webkit-scrollbar-thumb{background:var(--bdr2)}
+.mhdr{padding:12px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.mhdr-title{font-family:var(--serif);font-weight:700;font-size:13px;color:var(--gold2)}
+.mclose{width:22px;height:22px;border-radius:3px;border:1px solid var(--bdr2);background:transparent;
+  color:var(--muted);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.mclose:hover{border-color:var(--red);color:var(--red)}
+.mbody{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.mdrop{aspect-ratio:2.5/1;border:2px dashed var(--bdr2);border-radius:7px;background:var(--p1);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
+.mdrop:hover,.mdrop.drag{border-color:var(--gold)}
+.mdrop.loaded{border-style:solid;border-color:var(--teal)}
+.mdrop canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+.mdrop .dico{font-size:22px;opacity:.4;pointer-events:none}
+.mdrop .dlbl{font-size:8px;color:var(--muted);letter-spacing:.1em;pointer-events:none}
+.loaded .dico,.loaded .dlbl{opacity:.25}
+.mrow{display:flex;align-items:center;gap:8px}
+.mlbl{font-size:9px;color:var(--text);flex:1;letter-spacing:.04em}
+.mval{font-size:9px;color:var(--gold);min-width:30px;text-align:right;font-family:var(--mono)}
+input[type=range].sm{height:2px}
+.mgrid{display:grid;gap:5px}
+.mgrid-2{grid-template-columns:1fr 1fr}
+.mgrid-4{grid-template-columns:repeat(4,1fr)}
+.mbtn{padding:8px 5px;border-radius:5px;border:1px solid var(--bdr);background:var(--p1);
+  color:var(--muted);font-family:var(--mono);font-size:8px;cursor:pointer;transition:all .12s;text-align:center;line-height:1.5}
+.mbtn:hover{border-color:var(--bdr2)}
+.mbtn.active{border-color:var(--gold);color:var(--gold2);background:rgba(212,160,32,.08)}
+.mbtn .mi{display:block;font-size:13px;margin-bottom:2px}
+.mprev{background:var(--p1);border-radius:6px;border:1px solid var(--bdr);
+  padding:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;min-height:76px}
+.pbox{display:flex;flex-direction:column;align-items:center;gap:4px}
+.plbl{font-size:7px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.plbl.hi{color:var(--teal)}
+.parrow{font-size:13px;color:var(--bdr2);margin-bottom:14px}
+.name-inp{width:100%;padding:7px 10px;border-radius:4px;border:1px solid var(--bdr2);
+  background:var(--p1);color:var(--text);font-family:var(--mono);font-size:10px;outline:none}
+.name-inp:focus{border-color:var(--gold)}
+.conf-btn{width:100%;padding:11px;border-radius:6px;border:none;
+  background:linear-gradient(135deg,var(--teal),#1a7858);color:#041810;
+  font-family:var(--serif);font-weight:700;font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  cursor:pointer;transition:all .15s}
+.conf-btn:hover{filter:brightness(1.1)}
+.conf-btn:disabled{opacity:.35;cursor:default}
+.cancel-lnk{text-align:center;margin-top:3px}
+.cancel-lnk button{background:none;border:none;color:var(--muted);font-size:8px;cursor:pointer;font-family:var(--mono)}
+.cancel-lnk button:hover{color:var(--text)}
+/* steps */
+.steps-wrap{display:flex;flex-direction:column;gap:3px}
+.steps-info{display:flex;justify-content:space-between;font-size:7px;color:var(--muted);letter-spacing:.08em}
+.steps-bar{display:flex;gap:2px}
+.step{flex:1;height:3px;border-radius:2px;background:var(--bdr2);transition:background .3s}
+.step.done{background:var(--teal)}
+.step.cur{background:var(--gold);animation:sp .8s infinite}
+@keyframes sp{0%,100%{opacity:1}50%{opacity:.4}}
+/* span picker */
+.span-picker{display:grid;grid-template-columns:repeat(6,26px);gap:3px}
+.span-cell{width:26px;height:22px;border-radius:3px;border:1px solid var(--bdr);background:var(--p1);
+  cursor:pointer;font-size:7px;color:var(--muted);display:flex;align-items:center;justify-content:center;
+  transition:all .1s;user-select:none}
+.span-cell:hover{border-color:var(--bdr2)}
+.span-cell.sel{border-color:var(--gold);background:rgba(212,160,32,.15);color:var(--gold2)}
+.span-cell.inrange{border-color:rgba(212,160,32,.35);background:rgba(212,160,32,.05)}
+.span-display{font-size:9px;color:var(--gold);letter-spacing:.06em;margin-top:3px}
+
+/* ctx menu */
+.ctx-menu{position:fixed;background:var(--p2);border:1px solid var(--bdr2);border-radius:6px;
+  padding:4px 0;z-index:500;min-width:130px;box-shadow:0 8px 24px rgba(0,0,0,.5);display:none}
+.ctx-menu.open{display:block}
+.ctx-item{padding:6px 12px;font-size:9px;color:var(--text);cursor:pointer;letter-spacing:.04em;transition:background .1s}
+.ctx-item:hover{background:rgba(180,140,40,.1);color:var(--gold)}
+.ctx-item.danger:hover{background:rgba(160,32,16,.15);color:var(--red)}
+.ctx-sep{height:1px;background:var(--bdr);margin:3px 0}
+
+/* section label */
+.sec-lbl{font-size:8px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── TOOLBAR ── -->
+<div class="toolbar">
+  <div class="logo">🌾 Farm Scene Maker</div>
+  <div class="sep"></div>
+  <span class="lbl">模式</span>
+  <button class="tbtn active" id="t_paint"   onclick="setMode('paint')">🖌 绘制</button>
+  <button class="tbtn"        id="t_erase"   onclick="setMode('erase')">⌫ 擦除</button>
+  <button class="tbtn"        id="t_fill"    onclick="setMode('fill')">🪣 填充</button>
+  <button class="tbtn"        id="t_terrain" onclick="setMode('terrain')">⛰ 地形</button>
+  <button class="tbtn"        id="t_pick"    onclick="setMode('pick')">💧 吸管</button>
+  <button class="tbtn"        id="t_walk"    onclick="setMode('walk')">🚶 行走</button>
+  <div class="sep"></div>
+  <button class="tbtn" onclick="toggleGrid()">⊞ 网格</button>
+  <button class="tbtn" onclick="toggleElevViz()">🏔 高度图</button>
+  <div class="sep"></div>
+  <button class="tbtn" onclick="undo()">↩ 撤销</button>
+  <button class="tbtn" onclick="redo()">↪ 重做</button>
+  <div class="sep"></div>
+  <button class="tbtn" style="background:linear-gradient(135deg,#3a7820,#285010);border-color:#60a838;color:#d0f0a0" onclick="exportScene()">⬇ 导出</button>
+</div>
+
+<!-- ── MAIN ── -->
+<div class="main">
+
+<!-- LEFT -->
+<div class="lp">
+  <div class="ptabs">
+    <button class="ptab active" onclick="switchTab(this,'tiles')">素材</button>
+    <button class="ptab"        onclick="switchTab(this,'terrain')">地形</button>
+    <button class="ptab"        onclick="switchTab(this,'layers')">图层</button>
+  </div>
+
+  <!-- tiles tab -->
+  <div class="tab-pane active" id="tab-tiles">
+    <div class="tcats" id="tileCats"></div>
+    <div class="tgrid" id="tileGrid"></div>
+    <div class="imp-row"><button class="imp-trigger" onclick="openImport()">⊕ 导入自定义素材</button></div>
+    <!-- layer quick-select -->
+    <div style="display:flex;border-top:1px solid var(--bdr);flex-shrink:0">
+      <button class="ptab active" id="ltab0" onclick="selLayer(0)">地面</button>
+      <button class="ptab"        id="ltab1" onclick="selLayer(1)">物件</button>
+      <button class="ptab"        id="ltab2" onclick="selLayer(2)">建筑</button>
+      <button class="ptab"        id="ltab3" onclick="selLayer(3)">障碍</button>
+    </div>
+  </div>
+
+  <!-- terrain tab -->
+  <div class="tab-pane" id="tab-terrain">
+    <div class="terrain-tab">
+      <div class="tsec">
+        <div class="tsec-title">高度层级</div>
+        <div class="egrid" id="elevGrid"></div>
+        <p>地形模式下点击格子应用高度。高度差自动生成悬崖侧面。</p>
+      </div>
+      <div class="tsec">
+        <div class="tsec-title">坡度方向</div>
+        <div class="sgrid">
+          <button class="sbtn active" data-slope="flat" onclick="setSlope(this)">⬡ 平</button>
+          <button class="sbtn" data-slope="N"  onclick="setSlope(this)">↑ N</button>
+          <button class="sbtn" data-slope="S"  onclick="setSlope(this)">↓ S</button>
+          <button class="sbtn" data-slope="E"  onclick="setSlope(this)">→ E</button>
+          <button class="sbtn" data-slope="W"  onclick="setSlope(this)">← W</button>
+          <button class="sbtn" data-slope="NE" onclick="setSlope(this)">↗NE</button>
+          <button class="sbtn" data-slope="NW" onclick="setSlope(this)">↖NW</button>
+          <button class="sbtn" data-slope="SE" onclick="setSlope(this)">↘SE</button>
+        </div>
+        <p>坡度配合高度差形成"上楼梯"的视觉倾斜效果（未来可扩展碰撞）。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- layers tab -->
+  <div class="tab-pane" id="tab-layers">
+    <div class="layers-tab" id="layersTabContent"></div>
+  </div>
+</div>
+
+<!-- CANVAS -->
+<div class="carea" id="canvasWrap">
+  <canvas id="gc"></canvas>
+  <div class="mode-hint" id="modeHint">🖌 绘制模式 — 点击/拖拽</div>
+  <div class="zbtns">
+    <button class="zbtn" onclick="doZoom(1.1)">＋</button>
+    <button class="zbtn" onclick="doZoom(0.91)">－</button>
+    <button class="zbtn" onclick="resetView()" title="居中">⊙</button>
+  </div>
+  <div class="coords-info" id="coordsInfo">— , —</div>
+  <div class="elev-info" id="elevInfo">高度图模式</div>
+</div>
+
+<!-- RIGHT -->
+<div class="rp">
+  <div class="rsec">
+    <div class="rsec-title">小地图</div>
+    <canvas id="minimap" width="162" height="100"></canvas>
+  </div>
+  <div class="rsec">
+    <div class="rsec-title">图层可见 / 锁定</div>
+    <div id="rLayerList"></div>
+  </div>
+  <div class="rsec">
+    <div class="rsec-title">地图设置</div>
+    <div class="srow"><span class="slbl">宽</span><input type="range" id="mapW" min="10" max="60" value="26" step="2"><span class="sval" id="mapWV">26</span></div>
+    <div class="srow"><span class="slbl">高</span><input type="range" id="mapH" min="8"  max="50" value="20" step="2"><span class="sval" id="mapHV">20</span></div>
+    <div class="srow"><span class="slbl">格子px</span><input type="range" id="tszSlider" min="16" max="40" value="24" step="4"><span class="sval" id="tszV">24px</span></div>
+    <div class="srow"><span class="slbl">颗粒度</span><input type="range" id="grainSlider" min="1" max="6" value="1" step="1"><span class="sval" id="grainV">1px</span></div>
+    <div class="srow"><span class="slbl">立体厚度</span><input type="range" id="blockHSlider" min="0" max="16" value="8" step="1"><span class="sval" id="blockHV">8px</span></div>
+    <div class="srow"><span class="slbl">网格</span><input type="range" id="gridOp" min="0" max="8" value="2" step="1"><span class="sval" id="gridOpV">25%</span></div>
+  </div>
+  <div class="rsec">
+    <div class="rsec-title">操控</div>
+    <div class="krow"><b>WASD/方向键</b> 移动</div>
+    <div class="krow"><b>空格</b> 切换行走</div>
+    <div class="krow"><b>滚轮</b> 缩放 <b>中键</b> 平移</div>
+    <div class="krow"><b>Ctrl+Z/Y</b> 撤销/重做</div>
+    <div class="krow"><b>右键</b> 上下文菜单</div>
+    <div class="krow"><b>P/E/F/T/I/G</b> 模式切换</div>
+  </div>
+  <div class="rsec">
+    <div class="rsec-title">操作</div>
+    <button class="abtn" onclick="fillGround()">🌿 铺满草地</button>
+    <button class="abtn" onclick="clearLayer()">清空当前层</button>
+    <button class="abtn danger" onclick="clearAll()">⚠ 清空全部</button>
+    <button class="abtn primary" onclick="exportScene()">⬇ 导出 PNG</button>
+  </div>
+</div>
+
+</div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ── IMPORT MODAL ── -->
+<div class="modal-bg" id="importModal">
+<div class="modal">
+  <div class="mhdr">
+    <div class="mhdr-title">⊕ 导入自定义素材</div>
+    <button class="mclose" onclick="closeImport()">✕</button>
+  </div>
+  <div class="mbody">
+
+    <div class="steps-wrap">
+      <div class="steps-info"><span id="stepLbl">步骤1·上传</span><span id="stepNum">1/5</span></div>
+      <div class="steps-bar">
+        <div class="step cur" id="s1"></div><div class="step" id="s2"></div>
+        <div class="step" id="s3"></div><div class="step" id="s4"></div><div class="step" id="s5"></div>
+      </div>
+    </div>
+
+    <div class="mdrop" id="mdrop">
+      <span class="dico">🖼</span>
+      <div class="dlbl">点击或拖拽图片 · JPG PNG WebP</div>
+      <canvas id="mdropThumb"></canvas>
+    </div>
+
+    <div>
+      <div class="sec-lbl">图片格式</div>
+      <div class="mgrid mgrid-2">
+        <button class="mbtn active" id="fmtFlat" onclick="setFmt('flat')">
+          <span class="mi">⬜</span>正方形贴图<br><span style="font-size:7px;color:var(--muted)">自动等轴投影</span>
+        </button>
+        <button class="mbtn" id="fmtIso" onclick="setFmt('iso')">
+          <span class="mi">⬡</span>等轴素材<br><span style="font-size:7px;color:var(--muted)">已是菱形</span>
+        </button>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec-lbl">素材类型</div>
+      <div class="mgrid mgrid-4">
+        <button class="mbtn active" data-type="ground"   onclick="setType('ground')"><span class="mi">⬡</span>地面</button>
+        <button class="mbtn"        data-type="object"   onclick="setType('object')"><span class="mi">🌿</span>物件</button>
+        <button class="mbtn"        data-type="building" onclick="setType('building')"><span class="mi">🏠</span>建筑</button>
+        <button class="mbtn"        data-type="obstacle" onclick="setType('obstacle')"><span class="mi">🪨</span>障碍</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec-lbl">占位格 <span style="color:var(--teal);font-size:7px">拖拽选择</span>
+        <span class="span-display" id="spanDisplay">1×1 格</span>
+      </div>
+      <div class="span-picker" id="spanPicker"></div>
+    </div>
+
+    <div>
+      <div class="sec-lbl">像素化参数</div>
+      <div class="mrow"><span class="mlbl">颗粒度</span><input type="range" class="sm" id="mGrain" min="1" max="8" value="2" step="1" style="flex:1"><span class="mval" id="mGrainV">2px</span></div>
+      <div class="mrow" id="mFlatRow"><span class="mlbl">像素块</span><input type="range" class="sm" id="mPixSz" min="1" max="8" value="3" step="1" style="flex:1"><span class="mval" id="mPixSzV">3px</span></div>
+      <div class="mrow" id="mIsoRow" style="display:none"><span class="mlbl">缩放比</span><input type="range" class="sm" id="mIsoSc" min="50" max="200" value="100" step="10" style="flex:1"><span class="mval" id="mIsoScV">100%</span></div>
+      <div class="mrow"><span class="mlbl">颜色数</span><input type="range" class="sm" id="mColors" min="8" max="64" value="32" step="2" style="flex:1"><span class="mval" id="mColorsV">32色</span></div>
+      <div class="mrow"><span class="mlbl">对比度</span><input type="range" class="sm" id="mContrast" min="80" max="160" value="120" step="2" style="flex:1"><span class="mval" id="mContrastV">1.20</span></div>
+      <div class="mrow"><span class="mlbl">饱和度</span><input type="range" class="sm" id="mSat" min="70" max="180" value="125" step="2" style="flex:1"><span class="mval" id="mSatV">1.25</span></div>
+      <div class="mrow"><span class="mlbl">暖色调</span><input type="range" class="sm" id="mWarm" min="-15" max="25" value="5" step="1" style="flex:1"><span class="mval" id="mWarmV">+5</span></div>
+      <div class="mrow"><span class="mlbl">色板</span>
+        <div style="display:flex;gap:4px">
+          <button class="mbtn active" id="palSDW"  onclick="setPal('stardew')" style="padding:3px 8px;font-size:7px">星露谷</button>
+          <button class="mbtn"        id="palAuto"  onclick="setPal('auto')"    style="padding:3px 8px;font-size:7px">自动</button>
+        </div>
+      </div>
+      <div class="mrow"><span class="mlbl">立体厚度系数</span><input type="range" class="sm" id="mHeight" min="0" max="10" value="0" step="1" style="flex:1"><span class="mval" id="mHeightV">0</span></div>
+      <div class="mrow"><span class="mlbl">可穿越</span><input type="checkbox" id="mWalkable" checked style="accent-color:var(--gold);cursor:pointer"></div>
+    </div>
+
+    <div>
+      <div class="sec-lbl">实时预览</div>
+      <div class="mprev" id="mprev"><div style="font-size:9px;color:var(--muted)">上传图片后自动预览</div></div>
+    </div>
+
+    <div>
+      <div class="sec-lbl">素材名称</div>
+      <input class="name-inp" id="mName" type="text" placeholder="输入名称（最多16字）" maxlength="16">
+    </div>
+
+    <button class="conf-btn" id="confBtn" disabled onclick="confirmImport()">✦ 添加到素材面板</button>
+    <div class="cancel-lnk"><button onclick="closeImport()">✕ 取消，返回编辑</button></div>
+  </div>
+</div>
+</div>
+
+<!-- Context menu -->
+<div class="ctx-menu" id="ctxMenu">
+  <div class="ctx-item" onclick="ctxAction('copy')">📋 复制</div>
+  <div class="ctx-item" onclick="ctxAction('paste')">📌 粘贴</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" onclick="ctxAction('pick')">💧 吸取 tile</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" onclick="ctxAction('erase')">⌫ 清除格子</div>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" style="display:none">
+
+<script>
+// Layer quick-select (left panel bottom tabs)
+function selLayer(L) {
+  window._activeLayerOverride = L;
+  document.querySelectorAll('[id^=ltab]').forEach((b,i)=>b.classList.toggle('active',i===L));
+  if (window._sceneEditorSelLayer) window._sceneEditorSelLayer(L);
+}
+</script>
+
+<!-- Load scene editor as ES module -->
+<script type="module">
+import { init } from './scene-editor.js';
+// expose selLayer hook
+import { setMode } from './scene-editor.js';
+window._sceneEditorSelLayer = (L) => {
+  // reach into scene-editor module state via exposed globals
+  // activeLayer is set inside scene-editor; we can trigger refresh via a helper
+  if (window._selLayer) window._selLayer(L);
+};
+init();
+</script>
+
+<script>
+// Expose _selLayer after module sets up globals
+// scene-editor.js sets window._selLayer during init
+</script>
+</body>
+</html>
