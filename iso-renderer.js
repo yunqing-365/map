@@ -266,15 +266,19 @@ export function getSortedItems(layers, elevMap, MW, MH, lVisible) {
         const def = TILES[id]; if (!def) continue;
 
         // skip non-anchor multi-tile cells
-        if (typeof cell === 'object' && cell.anchor) {
+       if (typeof cell === 'object' && cell.anchor) {
           const key = `${layer}_${cell.anchor.ax}_${cell.anchor.ay}`;
           if (seen.has(key)) continue;
           seen.add(key);
           const atx = cell.anchor.ax, aty = cell.anchor.ay;
           const elev = elevMap?.[aty]?.[atx]?.elev ?? 0;
-          // depth: tile row + elev pushes closer (higher = rendered later)
-          // layer adds fractional offset so layer 0 < 1 < 2 < 3 within same row
-          const depth = (atx + aty) + elev * 0.5 + layer * 0.05;
+          
+          // 【核心修复】：以建筑占地的最右下角（视觉最前方）计算深度
+          const footTx = atx + (cell.spanW ?? 1) - 1;
+          const footTy = aty + (cell.spanH ?? 1) - 1;
+          
+          // 图层权重：地面 0, 物件 0.1, 建筑 0.2, 障碍 0.3
+          const depth = (footTx + footTy) + elev * 0.5 + layer * 0.1; 
           items.push({ tx: atx, ty: aty, layer, id, depth, elev,
                        spanW: cell.spanW ?? 1, spanH: cell.spanH ?? 1 });
         } else {
@@ -348,22 +352,30 @@ export function renderScene(ctx, canvas, {
     const { sx, sy } = worldToScreen(wx, wy, canvas);
 
     // ── isIsoTile: already a diamond sprite, anchor at diamond D point ──
+    // 在 iso-renderer.js 的 renderScene 中
+// 找到 isIsoTile 的渲染逻辑，进行如下优化：
+    // ── isIsoTile: already a diamond sprite, anchor at diamond D point ──
     if (def.isCustom && def.isIsoTile && def._isoC) {
       const isoC = def._isoC;
-      // The isoC image's diamond "bottom tip" is at image center-bottom
-      // We want that point to align with the diamond D point of the cell
-      // D in screen: (sx + TSZ*S, sy + TSZ*S)
-      const anchorDx = sx + TSZ * S * (spanW + spanH - 1);        // center of span footprint
-      const anchorDy = sy + TSZ * S * (spanW + spanH) / 2;        // bottom tip of span
+      const anchorDx = sx + TSZ * S * (spanW + spanH - 1);        
+      const anchorDy = sy + TSZ * S * (spanW + spanH) / 2;        
 
-      // Scale isoC to match span footprint width (iso diamond width = TSZ*2 per tile)
       const targetW = TSZ * S * 2 * Math.max(spanW, spanH);
       const targetH = isoC.height / isoC.width * targetW;
 
-      ctx.save(); ctx.imageSmoothingEnabled = false;
+      ctx.save(); 
+      ctx.imageSmoothingEnabled = false;
+
+      // 【新增】：翻转逻辑
+      if (window._flipTile) {
+        ctx.translate(anchorDx, 0); // 将坐标系平移到锚点中心
+        ctx.scale(-1, 1);           // 水平镜像
+        ctx.translate(-anchorDx, 0);// 移回原位
+      }
+
       ctx.drawImage(isoC,
         Math.round(anchorDx - targetW / 2),
-        Math.round(anchorDy - targetH),          // image bottom = anchor point
+        Math.round(anchorDy - targetH),          
         Math.round(targetW), Math.round(targetH));
       ctx.restore();
       continue;
@@ -399,14 +411,22 @@ export function renderScene(ctx, canvas, {
       // 3D block side faces (drawn first, behind the sprite)
       const blockH = (def.height ?? 0) > 0 ? Math.round(globalBlockH * def.height / 10) : 0;
       if (blockH > 0) {
-        // Approximate block at footprint cell
         _drawBlock(ctx, tc, fsx, fsy, blockH);
       }
 
-      ctx.save(); ctx.imageSmoothingEnabled = false;
+      ctx.save(); 
+      ctx.imageSmoothingEnabled = false;
+
+      // 【新增】：翻转逻辑
+      if (window._flipTile) {
+        ctx.translate(anchorX, 0); // 将坐标系平移到锚点中心
+        ctx.scale(-1, 1);          // 水平镜像
+        ctx.translate(-anchorX, 0);// 移回原位
+      }
+
       ctx.drawImage(tc,
-        Math.round(anchorX - dispW / 2),   // horizontally centred
-        Math.round(anchorY - dispH),        // bottom of image = anchor
+        Math.round(anchorX - dispW / 2),   
+        Math.round(anchorY - dispH),        
         Math.round(dispW), Math.round(dispH));
       ctx.restore();
     }

@@ -211,6 +211,13 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey && e.key === 'z')            { e.preventDefault(); undo(); }
   if (e.ctrlKey && (e.key==='y'||e.key==='Y')){ e.preventDefault(); redo(); }
   if (e.key === 'Escape')                    closeImport();
+  // 在 mode shortcuts 附近加入：
+  if (e.key === 'r' || e.key === 'R') {
+    e.preventDefault();
+    window._flipTile = !window._flipTile; // 切换翻转状态
+  }
+
+
   // mode shortcuts
   const modeKeys = { p:'paint', e:'erase', f:'fill', t:'terrain', i:'pick', g:'walk' };
   if (!e.ctrlKey && modeKeys[e.key]) setMode(modeKeys[e.key]);
